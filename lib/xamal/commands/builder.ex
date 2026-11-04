@@ -140,7 +140,9 @@ defmodule Xamal.Commands.Builder do
         "mix esbuild.install --if-missing",
         "MIX_ENV=#{mix_env} mix assets.deploy",
         "MIX_ENV=#{mix_env} mix release #{release_name} --overwrite",
-        "chown -R $(stat -c '%u:%g' /app) /app/_build /app/deps /app/priv/static"
+        # Best effort. On Docker Desktop for Mac the bind mount already maps
+        # files to the host user and read-only git packs under deps refuse chown.
+        "(chown -R $(stat -c '%u:%g' /app) /app/_build /app/deps /app/priv/static 2>/dev/null || true)"
       ]
       |> Enum.join(" && ")
 
