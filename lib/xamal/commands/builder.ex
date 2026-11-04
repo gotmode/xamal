@@ -66,7 +66,9 @@ defmodule Xamal.Commands.Builder do
     tarball = tarball_path(config)
     release_dir = "_build/#{mix_env}/rel/#{release_name}"
 
-    ["tar", "-czf", tarball, "-C", release_dir, "."]
+    # COPYFILE_DISABLE stops macOS tar from packing AppleDouble "._" files,
+    # which GNU tar on the host unpacks into a broken bin/. No effect on Linux.
+    ["env", "COPYFILE_DISABLE=1", "tar", "-czf", tarball, "-C", release_dir, "."]
   end
 
   @doc """

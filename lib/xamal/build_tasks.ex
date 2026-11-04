@@ -173,7 +173,11 @@ defmodule Xamal.BuildTasks do
       |> SSH.ssh_flags(config.ssh.port)
       |> Enum.map_join(" ", &Xamal.Utils.shell_escape/1)
 
-    remote_setup = "mkdir -p #{dir} && tar -x -C #{dir}"
+    # The build dir persists between deploys so _build and deps stay warm. Every
+    # other path is cleared first, so a file deleted from the repo can't linger
+    # on the build host and still get compiled into the release.
+    remote_setup =
+      "mkdir -p #{dir} && find #{dir} -mindepth 1 -maxdepth 1 ! -name _build ! -name deps -exec rm -rf {} + && tar -x -C #{dir}"
     pipeline = "git archive --format=tar HEAD | ssh #{flags} #{destination} '#{remote_setup}'"
 
     case System.cmd("sh", ["-c", pipeline], stderr_to_stdout: true) do
