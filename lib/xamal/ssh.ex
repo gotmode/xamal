@@ -94,7 +94,7 @@ defmodule Xamal.SSH do
     # Use scp only when both an on-disk key and the scp binary are available.
     # A missing scp binary falls back to SFTP instead of raising :enoent, so
     # the upload still succeeds (just slower) and the contract is preserved.
-    case key_file(ssh_config) do
+    case scp_identity(ssh_config) do
       {:ok, key_path} ->
         if scp_available?() do
           upload_via_scp(key_path, ssh_config, hostname, port, local_path, remote_path)
@@ -108,6 +108,21 @@ defmodule Xamal.SSH do
   end
 
   defp scp_available?, do: System.find_executable("scp") != nil
+
+  # The identity a system scp call uses, an on-disk key file or, failing
+  # that, the ssh-agent `ssh.agent` names (`{:agent, socket}`).
+  defp scp_identity(ssh_config) do
+    case key_file(ssh_config) do
+      {:ok, key_path} ->
+        {:ok, key_path}
+
+      :none ->
+        case Ssh.agent_socket(ssh_config) do
+          nil -> :none
+          socket -> {:ok, {:agent, socket}}
+        end
+    end
+  end
 
   defp upload_via_sftp_pooled(ssh_config, hostname, port, local_path, remote_path) do
     checkout_result =
@@ -161,7 +176,7 @@ defmodule Xamal.SSH do
   # scp is only usable with an on-disk key *and* the binary present; either
   # missing falls back to SFTP, same as upload/4.
   defp scp_key_for_download(ssh_config) do
-    case key_file(ssh_config) do
+    case scp_identity(ssh_config) do
       {:ok, key_path} -> if scp_available?(), do: {:ok, key_path}, else: :none
       :none -> :none
     end
@@ -266,7 +281,8 @@ defmodule Xamal.SSH do
     # an agent holding several keys trips sshd's MaxAuthTries (default 6)
     # and disconnects with "Too many authentication failures".
     identity =
-      case key_file(ssh_config) do
+      case scp_identity(ssh_config) do
+        {:ok, {:agent, socket}} -> ["-o", "IdentityAgent=#{socket}"]
         {:ok, key_path} -> ["-i", key_path, "-o", "IdentitiesOnly=yes"]
         :none -> []
       end
@@ -286,7 +302,8 @@ defmodule Xamal.SSH do
     {user, host, port} = Proxy.parse_proxy(proxy, user: ssh_config.user)
 
     identity =
-      case key_file(ssh_config) do
+      case scp_identity(ssh_config) do
+        {:ok, {:agent, socket}} -> "-o IdentityAgent=#{Xamal.Utils.shell_escape(socket)} "
         {:ok, key_path} -> "-i #{Xamal.Utils.shell_escape(key_path)} -o IdentitiesOnly=yes "
         :none -> ""
       end
@@ -314,18 +331,22 @@ defmodule Xamal.SSH do
   authentication failures".
   """
   def scp_args(key_path, user, hostname, port, local_path, remote_path, direction \\ :upload) do
-    flags = [
-      "-i",
-      key_path,
-      "-P",
-      to_string(port),
-      "-o",
-      "BatchMode=yes",
-      "-o",
-      "StrictHostKeyChecking=accept-new",
-      "-o",
-      "IdentitiesOnly=yes"
-    ]
+    {identity, only} =
+      case key_path do
+        {:agent, socket} -> {[], ["-o", "IdentityAgent=#{socket}"]}
+        path -> {["-i", path], ["-o", "IdentitiesOnly=yes"]}
+      end
+
+    flags =
+      identity ++
+        [
+          "-P",
+          to_string(port),
+          "-o",
+          "BatchMode=yes",
+          "-o",
+          "StrictHostKeyChecking=accept-new"
+        ] ++ only
 
     remote = "#{user}@#{hostname}:#{remote_path}"
 

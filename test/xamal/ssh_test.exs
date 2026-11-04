@@ -176,4 +176,28 @@ defmodule Xamal.SSHTest do
       assert Xamal.SSH.proxy_flags(%Ssh{}) == []
     end
   end
+
+  describe "ssh.agent" do
+    test "with no key file, :ssh signs through the named agent socket" do
+      ssh = Xamal.Configuration.Ssh.new(%{"agent" => "/tmp/agent.sock"})
+      opts = Xamal.Configuration.Ssh.connect_options(ssh)
+      assert {:ssh_agent, socket_path: ~c"/tmp/agent.sock"} = opts[:key_cb]
+    end
+
+    test "a key file on disk wins over the agent" do
+      path = Path.join(System.tmp_dir!(), "xamal_agent_test_key")
+      File.write!(path, "not a real key")
+
+      ssh = Xamal.Configuration.Ssh.new(%{"keys" => [path], "agent" => "/tmp/agent.sock"})
+      assert {Xamal.SSH.KeyProvider, _} = Xamal.Configuration.Ssh.connect_options(ssh)[:key_cb]
+    after
+      File.rm(Path.join(System.tmp_dir!(), "xamal_agent_test_key"))
+    end
+
+    test "scp goes through the agent instead of -i" do
+      args = Xamal.SSH.scp_args({:agent, "/tmp/agent.sock"}, "u", "h", 22, "a", "/b")
+      refute "-i" in args
+      assert "IdentityAgent=/tmp/agent.sock" in args
+    end
+  end
 end

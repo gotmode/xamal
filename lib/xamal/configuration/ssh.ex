@@ -10,6 +10,7 @@ defmodule Xamal.Configuration.Ssh do
             keys_only: nil,
             keys: nil,
             key_data: nil,
+            agent: nil,
             config: nil,
             log_level: :error,
             max_concurrent_starts: 30,
@@ -26,6 +27,7 @@ defmodule Xamal.Configuration.Ssh do
       keys_only: Map.get(config, "keys_only"),
       keys: Map.get(config, "keys"),
       key_data: Map.get(config, "key_data"),
+      agent: Map.get(config, "agent"),
       config: Map.get(config, "config"),
       log_level: parse_log_level(Map.get(config, "log_level", "error")),
       max_concurrent_starts: Map.get(config, "max_concurrent_starts", 30),
@@ -62,11 +64,29 @@ defmodule Xamal.Configuration.Ssh do
   defp put_key_options(opts, %{keys: keys} = ssh) when is_list(keys) do
     case key_file(ssh) do
       {:ok, path} -> opts ++ [key_cb: {Xamal.SSH.KeyProvider, key_data: File.read!(path)}]
-      :none -> opts
+      :none -> put_agent_options(opts, ssh)
     end
   end
 
-  defp put_key_options(opts, _ssh), do: opts
+  defp put_key_options(opts, ssh), do: put_agent_options(opts, ssh)
+
+  # With no key file on disk, sign through an ssh-agent (Secretive, 1Password,
+  # ssh-agent) when `ssh.agent` names one, so the private key never has to sit
+  # on the filesystem.
+  defp put_agent_options(opts, ssh) do
+    case agent_socket(ssh) do
+      nil -> opts
+      socket -> opts ++ [key_cb: {:ssh_agent, socket_path: String.to_charlist(socket)}]
+    end
+  end
+
+  @doc """
+  The ssh-agent socket `ssh.agent` names, or nil. `true` means the agent in
+  `SSH_AUTH_SOCK`, a string is the socket's path.
+  """
+  def agent_socket(%{agent: true}), do: System.get_env("SSH_AUTH_SOCK")
+  def agent_socket(%{agent: path}) when is_binary(path), do: Path.expand(path)
+  def agent_socket(_ssh), do: nil
 
   @doc """
   The first configured key in `ssh.keys` that exists on disk, as
