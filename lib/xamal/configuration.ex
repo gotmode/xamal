@@ -28,7 +28,11 @@ defmodule Xamal.Configuration do
     :env,
     :ssh,
     :release,
-    :health_check
+    :health_check,
+    :deploy_queue,
+    # The commit a `builder.remote` build archives, when the deploy queue
+    # moved the deploy to a newer commit than the checkout's HEAD.
+    :source_commit
   ]
 
   @type t :: %__MODULE__{}
@@ -37,6 +41,7 @@ defmodule Xamal.Configuration do
     Boot,
     Builder,
     Caddy,
+    DeployQueue,
     Env,
     HealthCheck,
     Release,
@@ -103,7 +108,8 @@ defmodule Xamal.Configuration do
       env: env_config,
       ssh: Ssh.new(Map.get(raw_config, "ssh", %{})),
       release: Release.new(Map.get(raw_config, "release", %{}), raw_config),
-      health_check: HealthCheck.new(Map.get(raw_config, "health_check", %{}))
+      health_check: HealthCheck.new(Map.get(raw_config, "health_check", %{})),
+      deploy_queue: DeployQueue.new(Map.get(raw_config, "deploy_queue", %{}))
     }
 
     Validator.validate!(config)
@@ -245,6 +251,10 @@ defmodule Xamal.Configuration do
   Workspace on the `builder.remote` host where source is synced and the
   release is built. Per-service, so one build host can serve several apps.
   """
+  def deploy_queue_lock(%__MODULE__{} = config) do
+    "#{run_directory()}/deploy-#{service(config)}.lock"
+  end
+
   def build_directory(%__MODULE__{} = config) do
     "#{run_directory()}/builds/#{service(config)}"
   end

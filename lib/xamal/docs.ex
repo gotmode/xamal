@@ -61,6 +61,8 @@ defmodule Xamal.Docs do
       :readiness_delay    Seconds to wait before health checks (default: 7)
       :deploy_timeout     Max deploy time in seconds (default: 30)
       :drain_timeout      Seconds to drain old release (default: 30)
+      :deploy_queue       One deploy at a time: wait_timeout (1800),
+                          hold_timeout (3600), follow (a git ref, unset)
       :retain_releases    Number of old releases to keep (default: 5)
       :primary_role       Primary role name (default: web)
     """)

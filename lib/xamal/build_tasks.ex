@@ -80,6 +80,7 @@ defmodule Xamal.BuildTasks do
   end
 
   # Source is synced to the build host with `git archive HEAD | ssh ... tar -x`
+  # (or the commit the deploy queue moved the deploy on to)
   # (only committed files, which matches what the deploy dirty-check already
   # requires). That one step shells out to the real ssh binary because piping
   # local output into a remote command isn't something Erlang's :ssh can do.
@@ -178,7 +179,12 @@ defmodule Xamal.BuildTasks do
     # on the build host and still get compiled into the release.
     remote_setup =
       "mkdir -p #{dir} && find #{dir} -mindepth 1 -maxdepth 1 ! -name _build ! -name deps -exec rm -rf {} + && tar -x -C #{dir}"
-    pipeline = "git archive --format=tar HEAD | ssh #{flags} #{destination} '#{remote_setup}'"
+
+    # The deploy queue may have moved the deploy on to a newer commit than HEAD.
+    commit = config.source_commit || "HEAD"
+
+    pipeline =
+      "git archive --format=tar #{commit} | ssh #{flags} #{destination} '#{remote_setup}'"
 
     case System.cmd("sh", ["-c", pipeline], stderr_to_stdout: true) do
       {_, 0} ->

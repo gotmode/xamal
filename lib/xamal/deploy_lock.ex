@@ -8,6 +8,11 @@ defmodule Xamal.DeployLock do
   alias Xamal.Context
   alias Xamal.LocalIdentity
 
+  # Longer than any boot, health check and drain, the part of a deploy the
+  # lock covers.
+  @stale_lock_seconds 900
+  @stale_lock_poll 10
+
   @spec with_lock(Context.t(), (-> result) | (Context.t() -> result)) :: result
         when result: term()
   def with_lock(%Context{} = context, fun) when is_function(fun) do
@@ -32,7 +37,7 @@ defmodule Xamal.DeployLock do
     end
   end
 
-  defp acquire_lock(context) do
+  defp acquire_lock(context, retried \\ false) do
     config = context.config
 
     say("Acquiring the deploy lock...", :magenta)
@@ -48,10 +53,50 @@ defmodule Xamal.DeployLock do
         raise "SSH connection failed to #{hostname}:#{port}"
 
       {:error, _reason} ->
-        say("Deploy lock already in place!", :red)
-        print_lock_status(context)
-        raise "Deploy lock found. Run 'mix xamal.lock.status' for more information"
+        if context.holding_queue and not retried and automatic_lock_cleared?(context) do
+          acquire_lock(context, true)
+        else
+          say("Deploy lock already in place!", :red)
+          print_lock_status(context)
+          raise "Deploy lock found. Run 'mix xamal.lock.status' for more information"
+        end
     end
+  end
+
+  # A deploy holding the deploy queue is the only one past it, so a lock
+  # another deploy took on its own was either left by a deploy that was
+  # interrupted, or belongs to one run by an older Xamal that does not queue.
+  # Wait out the second kind, clear the first. A lock taken by hand
+  # (`mix xamal.lock.acquire`) still stops the deploy.
+  defp automatic_lock_cleared?(context, waited \\ 0) do
+    case on_primary(Lock.automatic_lock_age(context.config), context) do
+      {:ok, age} ->
+        case Integer.parse(age) do
+          {seconds, _} when seconds >= @stale_lock_seconds ->
+            say("Clearing a deploy lock an interrupted deploy left #{seconds}s ago", :yellow)
+            on_primary(Lock.release(context.config), context)
+            true
+
+          {_seconds, _} when waited < @stale_lock_seconds ->
+            say("  Another deploy is booting a release, waiting for it...", :yellow)
+            Process.sleep(@stale_lock_poll * 1000)
+            automatic_lock_cleared?(context, waited + @stale_lock_poll)
+
+          _ ->
+            false
+        end
+
+      {:error, {:exit_status, _, _}} ->
+        # Gone since the failed acquire, or taken by hand.
+        lock_gone?(context)
+
+      {:error, _} ->
+        false
+    end
+  end
+
+  defp lock_gone?(context) do
+    match?({:error, _}, on_primary(Lock.status(context.config), context))
   end
 
   defp lock_command(config) do

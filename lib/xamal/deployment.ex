@@ -4,12 +4,13 @@ defmodule Xamal.Deployment do
   """
 
   import Xamal.DeployLock
+  import Xamal.DeployQueue
   import Xamal.Hooks
   import Xamal.Output
   import Xamal.Remote
   import Xamal.TaskHelpers
 
-  alias Xamal.{AppTasks, BuildTasks, Context, Prune, ServerTasks}
+  alias Xamal.{AppTasks, BuildTasks, Context, Prune, ReleaseTarget, ServerTasks}
   alias Xamal.Commands.App, as: AppCommand
 
   @type task_opts :: keyword()
@@ -19,7 +20,7 @@ defmodule Xamal.Deployment do
     ensure_clean_git!(opts)
 
     print_runtime(fn ->
-      with_lock(context, fn context ->
+      queued_and_locked(context, fn context ->
         record_audit("Setup started", %{}, context)
 
         say("Bootstrapping servers...", :magenta)
@@ -36,12 +37,28 @@ defmodule Xamal.Deployment do
   def deploy(opts, context) do
     ensure_clean_git!(opts)
 
+    with_queue(context, fn context, waited ->
+      case ReleaseTarget.resolve(context, opts, waited) do
+        {:already_live, live} ->
+          version = context.config.version
+          say("#{version} is already live (#{live}), nothing to deploy", :green)
+          record_audit("Deploy skipped, already live", %{version: version}, context)
+          :already_live
+
+        {:deploy, context} ->
+          run_deploy(opts, context)
+      end
+    end)
+  end
+
+  defp run_deploy(opts, context) do
     config = context.config
     record_audit("Deploy started", %{version: config.version}, context)
 
     runtime = print_runtime(fn -> do_deploy(opts, context) end)
 
     record_audit("Deploy completed", %{version: config.version}, context)
+    say("Released #{config.version}", :green)
     run_hook("post-deploy", [skip_hooks: Keyword.get(opts, :skip_hooks, false)], context)
     runtime
   end
@@ -55,14 +72,7 @@ defmodule Xamal.Deployment do
 
     runtime =
       print_runtime(fn ->
-        distribute_release(opts, context)
-
-        with_lock(context, fn context ->
-          run_hook("pre-deploy", [skip_hooks: Keyword.get(opts, :skip_hooks, false)], context)
-
-          say("Booting app...", :magenta)
-          AppTasks.boot([], opts, context)
-        end)
+        with_queue(context, fn context, _waited -> run_redeploy(opts, context) end)
       end)
 
     record_audit("Redeploy completed", %{version: config.version}, context)
@@ -79,7 +89,7 @@ defmodule Xamal.Deployment do
     record_audit("Rollback started", %{version: version}, context)
 
     print_runtime(fn ->
-      with_lock(context, fn context -> run_rollback(version, opts, context) end)
+      queued_and_locked(context, fn context -> run_rollback(version, opts, context) end)
     end)
 
     record_audit("Rollback completed", %{version: version}, context)
@@ -110,6 +120,21 @@ defmodule Xamal.Deployment do
       say("Pruning old releases...", :magenta)
       Prune.prune([], opts, context)
     end)
+  end
+
+  defp run_redeploy(opts, context) do
+    distribute_release(opts, context)
+
+    with_lock(context, fn context ->
+      run_hook("pre-deploy", [skip_hooks: Keyword.get(opts, :skip_hooks, false)], context)
+
+      say("Booting app...", :magenta)
+      AppTasks.boot([], opts, context)
+    end)
+  end
+
+  defp queued_and_locked(context, fun) do
+    with_queue(context, fn context, _waited -> with_lock(context, fun) end)
   end
 
   defp run_rollback(version, opts, context) do
