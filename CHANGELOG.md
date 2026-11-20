@@ -8,6 +8,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `caddy.health_uri`. Set, the Caddyfile names both blue-green ports with
+  active health checks and stays the same across deploys, so a deploy no
+  longer reloads Caddy, which closed every client connection on the host.
+  A deploy hands over through a file per slot (`XAMAL_ROTATION_FILE` in the
+  systemd unit) that the app's `health_uri` answers non-2xx for, so the new
+  slot gets traffic only once healthy and the old one is out of rotation
+  before it stops. The Caddyfile is written, and Caddy reloaded, only when
+  it changed. `mix xamal.docs caddy` has the details.
+
 - The deploy queue. `deploy`, `redeploy`, `setup` and `rollback` take a
   `flock` lock on the primary host (`~/.xamal/deploy-<service>.lock`) before
   they build anything and keep it until they finish, so two deploys started

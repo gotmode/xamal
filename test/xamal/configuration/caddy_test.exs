@@ -60,6 +60,44 @@ defmodule Xamal.Configuration.CaddyTest do
     end
   end
 
+  describe "both slots" do
+    test "are off by default" do
+      caddy = Caddy.new(%{"host" => "app.example.com"})
+
+      refute Caddy.both_slots?(caddy)
+      assert caddy.health_interval == 2
+      assert caddy.health_fails == 2
+    end
+
+    test "name both ports with health checks, whatever the upstream port" do
+      caddy =
+        Caddy.new(%{
+          "host" => "app.example.com",
+          "app_port" => 4000,
+          "health_uri" => "/health/rotation"
+        })
+
+      assert Caddy.both_slots?(caddy)
+      caddyfile = Caddy.generate_caddyfile(caddy, 4001)
+
+      assert caddyfile == Caddy.generate_caddyfile(caddy, 4000)
+      assert caddyfile =~ "app.example.com {"
+      assert caddyfile =~ "reverse_proxy localhost:4000 localhost:4001 {"
+      assert caddyfile =~ "health_uri /health/rotation"
+      assert caddyfile =~ "health_interval 2s"
+      assert caddyfile =~ "health_fails 2"
+      assert caddyfile =~ "lb_try_duration 5s"
+      assert caddyfile =~ ~r/}\n}\n$/
+    end
+
+    test "take interval times fails plus a second to notice a slot" do
+      caddy = Caddy.new(%{"health_uri" => "/up", "health_interval" => 3, "health_fails" => 2})
+
+      assert Caddy.rotation_delay(caddy) == 7
+      assert Caddy.generate_caddyfile(caddy, 4000) =~ "health_interval 3s"
+    end
+  end
+
   describe "generate_caddyfile/2" do
     test "with host" do
       caddy = Caddy.new(%{"host" => "app.example.com"})

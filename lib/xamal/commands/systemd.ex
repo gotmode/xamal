@@ -9,6 +9,7 @@ defmodule Xamal.Commands.Systemd do
 
   import Xamal.Commands.Base
 
+  alias Xamal.Commands.Caddy, as: CaddyCommands
   alias Xamal.Configuration
   alias Xamal.Configuration.{Caddy, Role}
 
@@ -35,6 +36,7 @@ defmodule Xamal.Commands.Systemd do
     EnvironmentFile=-#{service_dir}/env/app.env
     Environment=PORT=%i
     Environment=RELEASE_NODE=#{release_name}_%i
+    Environment=XAMAL_ROTATION_FILE=#{CaddyCommands.rotation_file(config, "%i")}
     ExecStart=#{service_dir}/current/bin/#{release_name} start
     Restart=on-failure
     RestartSec=5

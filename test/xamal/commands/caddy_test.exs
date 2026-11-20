@@ -43,6 +43,54 @@ defmodule Xamal.Commands.CaddyTest do
     end
   end
 
+  describe "write_caddyfile_if_changed/2" do
+    setup do
+      dir = Path.join(System.tmp_dir!(), "xamal-caddy-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      config = %{
+        @config
+        | caddy: %Xamal.Configuration.Caddy{
+            host: "app.example.com",
+            app_port: 4000,
+            hosts: [],
+            health_uri: "/health/rotation"
+          }
+      }
+
+      %{dir: dir, config: config}
+    end
+
+    test "writes and says so only when the file changes", %{dir: dir, config: config} do
+      run = fn port ->
+        cmd =
+          config
+          |> Caddy.write_caddyfile_if_changed(port)
+          |> Enum.join(" ")
+          |> String.replace("/opt/xamal/my-app", dir)
+
+        {out, 0} = System.cmd("sh", ["-c", cmd])
+        out
+      end
+
+      assert run.(4000) =~ "caddyfile-changed"
+      assert File.read!(Path.join(dir, "Caddyfile")) =~ "localhost:4000 localhost:4001"
+      assert run.(4001) == ""
+      assert run.(4000) == ""
+      refute File.exists?(Path.join(dir, "Caddyfile.next"))
+    end
+  end
+
+  describe "rotation" do
+    test "out touches the slot's file and in removes it" do
+      assert Enum.join(Caddy.rotate_out(@config, 4001), " ") ==
+               "mkdir -p /opt/xamal/my-app/rotation && touch /opt/xamal/my-app/rotation/out-4001"
+
+      assert Caddy.rotate_in(@config, 4001) == ["rm", "-f", "/opt/xamal/my-app/rotation/out-4001"]
+    end
+  end
+
   describe "reload/0" do
     test "reloads from the system Caddyfile so every app on the host stays loaded" do
       assert Caddy.reload() == ["sudo", "caddy", "reload", "--config", "/etc/caddy/Caddyfile"]

@@ -7,7 +7,10 @@ defmodule Xamal.Configuration.Caddy do
     :host,
     :hosts,
     :app_port,
-    :ssl
+    :ssl,
+    :health_uri,
+    health_interval: 2,
+    health_fails: 2
   ]
 
   def new(config) when is_map(config) do
@@ -15,7 +18,10 @@ defmodule Xamal.Configuration.Caddy do
       host: Map.get(config, "host"),
       hosts: Map.get(config, "hosts", []),
       app_port: Map.get(config, "app_port", 4000),
-      ssl: Map.get(config, "ssl", true)
+      ssl: Map.get(config, "ssl", true),
+      health_uri: Map.get(config, "health_uri"),
+      health_interval: Map.get(config, "health_interval", 2),
+      health_fails: Map.get(config, "health_fails", 2)
     }
   end
 
@@ -35,10 +41,46 @@ defmodule Xamal.Configuration.Caddy do
   def alt_port(%__MODULE__{app_port: port}), do: port + 1
 
   @doc """
+  Whether both slots sit behind one upstream with active health checks, so
+  a deploy changes no Caddy config (`health_uri` set).
+  """
+  def both_slots?(%__MODULE__{health_uri: uri}), do: is_binary(uri) and uri != ""
+
+  @doc """
+  Seconds Caddy needs to notice a slot coming into or going out of rotation,
+  one more than its checks take to flip it.
+  """
+  def rotation_delay(%__MODULE__{health_interval: interval, health_fails: fails}),
+    do: interval * fails + 1
+
+  @doc """
   Generate a Caddyfile for the given upstream port.
+
+  With `health_uri` set the file names both slots and does not depend on the
+  port, so it is the same before and after every swap. Caddy sends traffic to
+  the slots whose `health_uri` answers 2xx, preferring app_port, and retries a
+  request that found no slot or could not connect for up to 5 seconds.
   """
   def generate_caddyfile(%__MODULE__{} = caddy, upstream_port) do
-    caddyfile_block(caddy, "reverse_proxy localhost:#{upstream_port}")
+    if both_slots?(caddy) do
+      caddyfile_block(caddy, both_slots_directive(caddy))
+    else
+      caddyfile_block(caddy, "reverse_proxy localhost:#{upstream_port}")
+    end
+  end
+
+  defp both_slots_directive(caddy) do
+    """
+    reverse_proxy localhost:#{caddy.app_port} localhost:#{alt_port(caddy)} {
+            lb_policy first
+            lb_try_duration 5s
+            lb_try_interval 250ms
+            health_uri #{caddy.health_uri}
+            health_interval #{caddy.health_interval}s
+            health_passes 1
+            health_fails #{caddy.health_fails}
+        }\
+    """
   end
 
   @doc """
