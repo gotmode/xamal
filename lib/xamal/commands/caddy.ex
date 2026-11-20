@@ -66,6 +66,50 @@ defmodule Xamal.Commands.Caddy do
   end
 
   @doc """
+  Write the Caddyfile only when it differs from the one in place, and print
+  `caddyfile-changed` when it did, so the caller reloads Caddy only then.
+  """
+  def write_caddyfile_if_changed(config, upstream_port) do
+    caddyfile_content = CaddyConfig.generate_caddyfile(config.caddy, upstream_port)
+    escaped = String.replace(caddyfile_content, "'", "'\\''")
+    path = caddyfile_path(config)
+
+    [
+      "echo",
+      "'#{escaped}'",
+      ">",
+      "#{path}.next",
+      "&&",
+      "if cmp -s #{path}.next #{path}; then rm #{path}.next;",
+      "else mv #{path}.next #{path} && echo caddyfile-changed; fi"
+    ]
+  end
+
+  @doc """
+  Take a slot out of Caddy's rotation. Its `health_uri` answers non-2xx while
+  the file exists (the app finds it through XAMAL_ROTATION_FILE, set by the
+  systemd unit), so Caddy stops sending it new requests.
+  """
+  def rotate_out(config, port) do
+    combine([make_directory(rotation_directory(config)), ["touch", rotation_file(config, port)]])
+  end
+
+  @doc """
+  Put a slot back in Caddy's rotation.
+  """
+  def rotate_in(config, port) do
+    ["rm", "-f", rotation_file(config, port)]
+  end
+
+  @doc """
+  The file whose presence takes the slot on `port` out of rotation, as the
+  systemd unit names it (`XAMAL_ROTATION_FILE`).
+  """
+  def rotation_file(config, port), do: "#{rotation_directory(config)}/out-#{port}"
+
+  defp rotation_directory(config), do: "#{Configuration.service_directory(config)}/rotation"
+
+  @doc """
   Write a maintenance mode Caddyfile.
   """
   def write_maintenance_caddyfile(config) do

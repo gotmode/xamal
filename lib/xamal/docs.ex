@@ -176,6 +176,25 @@ defmodule Xamal.Docs do
     During deploys, Caddy switches between app_port and app_port+1
     for zero-downtime blue-green deployments.
 
+    ## Both slots, no reload
+
+      caddy:
+        host: app.example.com
+        health_uri: /health/rotation  # turns it on
+        health_interval: 2            # seconds between Caddy's checks (default 2)
+        health_fails: 2               # failed checks that take a slot out (default 2)
+
+    With health_uri set the Caddyfile names both ports and never changes
+    between deploys, so a deploy reloads no Caddy config. A reload closes
+    every client connection Caddy holds, on every site of the host. Caddy
+    sends requests to the slots whose health_uri answers 2xx.
+
+    The app must answer health_uri with a non-2xx status while the file named
+    by XAMAL_ROTATION_FILE (set by the systemd unit) exists. A deploy creates
+    that file for the new slot before starting it, removes it once the slot
+    passes health_check, waits for Caddy to see it, creates it for the old
+    slot, waits for Caddy to stop sending it requests, then stops it.
+
     The generated Caddyfile lives at /opt/xamal/<service>/Caddyfile.
     /etc/caddy/Caddyfile imports every service's Caddyfile; bootstrap adds
     that import line if it is missing and leaves the rest of the file alone.

@@ -13,9 +13,13 @@ defmodule Xamal.BlueGreen do
     ports = select_ports(host, config)
     sync_unit(host, config)
     ssh_exec(host, Server.link_current(config, version), config)
+    # A slot gets no traffic until it passed the health check below.
+    rotate(host, config, :out, ports.new)
     ssh_exec(host, Systemd.start(config, ports.new), config)
     wait_for_health!(host, config, ports.new, Keyword.get(opts, :rollback_version))
+    rotate(host, config, :in, ports.new)
     reload_caddy(host, config, ports.new, Keyword.get(opts, :skip_hooks, true), context)
+    hand_over(host, config, ports)
     stop_old_release(host, config, ports)
     enable_new_release(host, config, ports)
     ssh_exec(host, Caddy.write_active_port(config, ports.new), config)
@@ -129,9 +133,69 @@ defmodule Xamal.BlueGreen do
 
   defp reload_caddy(host, config, new_port, skip_hooks, context) do
     run_hook("pre-caddy-reload", [skip_hooks: skip_hooks], context)
-    ssh_exec(host, Caddy.write_caddyfile(config, new_port), config)
-    reload_caddy!(host, config)
+
+    if Configuration.Caddy.both_slots?(config.caddy) do
+      # The Caddyfile names both slots, so it changes only with the config
+      # itself. A reload closes every client connection Caddy holds, on every
+      # site of the host, so an unchanged file is never reloaded.
+      case ssh_exec(host, Caddy.write_caddyfile_if_changed(config, new_port), config) do
+        {:ok, output} ->
+          reload_if_changed(host, config, output)
+
+        {:error, reason} ->
+          raise "Failed to write the Caddyfile on #{host_label(config, host)}: #{inspect(reason)}"
+      end
+    else
+      ssh_exec(host, Caddy.write_caddyfile(config, new_port), config)
+      reload_caddy!(host, config)
+    end
+
     run_hook("post-caddy-reload", [skip_hooks: skip_hooks], context)
+  end
+
+  defp reload_if_changed(host, config, output) do
+    if output =~ "caddyfile-changed",
+      do: reload_caddy!(host, config),
+      else: say("  Caddyfile unchanged, Caddy not reloaded", :magenta)
+  end
+
+  # With both slots behind Caddy, the new slot is in rotation now. Wait for
+  # Caddy's checks to see it, take the old slot out, and wait for Caddy to
+  # stop sending it requests, so stopping it drops nothing.
+  defp hand_over(host, config, %{active: active_port, new: new_port})
+       when active_port != new_port do
+    if Configuration.Caddy.both_slots?(config.caddy) do
+      delay = Configuration.Caddy.rotation_delay(config.caddy)
+      say("  Waiting #{delay}s for Caddy to send traffic to port #{new_port}...", :magenta)
+      Process.sleep(delay * 1000)
+      rotate(host, config, :out, active_port)
+
+      say(
+        "  Waiting #{delay}s for Caddy to stop sending traffic to port #{active_port}...",
+        :magenta
+      )
+
+      Process.sleep(delay * 1000)
+    end
+  end
+
+  defp hand_over(_host, _config, _ports), do: :ok
+
+  defp rotate(host, config, direction, port) do
+    if Configuration.Caddy.both_slots?(config.caddy) do
+      cmd =
+        if direction == :in,
+          do: Caddy.rotate_in(config, port),
+          else: Caddy.rotate_out(config, port)
+
+      case ssh_exec(host, cmd, config) do
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          raise "Failed to take port #{port} #{direction} of rotation on #{host_label(config, host)}: #{inspect(reason)}"
+      end
+    end
   end
 
   defp stop_old_release(host, config, %{active: active_port, new: new_port})

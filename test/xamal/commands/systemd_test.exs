@@ -27,6 +27,7 @@ defmodule Xamal.Commands.SystemdTest do
       assert content =~ "EnvironmentFile=-/opt/xamal/my-app/env/app.env"
       assert content =~ "Environment=PORT=%i"
       assert content =~ "Environment=RELEASE_NODE=my_app_%i"
+      assert content =~ "Environment=XAMAL_ROTATION_FILE=/opt/xamal/my-app/rotation/out-%i"
       assert content =~ "ExecStart=/opt/xamal/my-app/current/bin/my_app start"
       assert content =~ "Restart=on-failure"
       assert content =~ "RestartSec=5"
