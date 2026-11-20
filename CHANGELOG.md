@@ -6,7 +6,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The deploy queue. `deploy`, `redeploy`, `setup` and `rollback` take a
+  `flock` lock on the primary host (`~/.xamal/deploy-<service>.lock`) before
+  they build anything and keep it until they finish, so two deploys started
+  at once, from any machines, run one after the other instead of colliding
+  in the build directory. The second one waits with a message naming the
+  first. The lock lives as long as the deploy's SSH session, so a deploy that
+  fails, is interrupted or loses its machine frees it at once, and
+  `deploy_queue.hold_timeout` (default an hour) frees it in any case.
+- `deploy` releases nothing when its commit is already live, or contained in
+  the commit that is live, and says so.
+- `deploy_queue.follow`, e.g. `"origin/main"`. A deploy that waited fetches
+  it and deploys its newest commit when that contains its own, so a burst of
+  merges ships in one deploy. Needs `builder.remote`, and stays on its own
+  commit when the newer one changes the deploy config.
+
 ### Fixed
+
+- A deploy holding the queue clears an automatic deploy lock that an
+  interrupted deploy left behind (older than 15 minutes) instead of failing
+  on it, and waits out a younger one. A lock taken by hand still stops it.
 
 - The env file is now uploaded over SFTP. Before, it was written with
   `echo '<content>' > file`, so every secret showed in the server's process

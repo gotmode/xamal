@@ -33,6 +33,19 @@ defmodule Xamal.Commands.Lock do
   end
 
   @doc """
+  The age in seconds of a lock a deploy took on its own ("Automatic deploy
+  lock"). Prints nothing and fails for a lock taken by hand, or no lock.
+  """
+  def automatic_lock_age(config) do
+    dir = lock_dir(config)
+
+    [
+      "base64 -d #{lock_details_file(config)} 2>/dev/null | grep -q '^Message: Automatic deploy lock'" <>
+        " && echo $(( $(date +%s) - $(stat -c %Y #{dir}) ))"
+    ]
+  end
+
+  @doc """
   Ensure the locks parent directory exists.
   """
   def ensure_locks_directory(_config) do

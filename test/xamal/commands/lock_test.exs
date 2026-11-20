@@ -44,6 +44,16 @@ defmodule Xamal.Commands.LockTest do
     end
   end
 
+  describe "automatic_lock_age/1" do
+    test "prints the age only of a lock a deploy took on its own" do
+      [cmd] = Lock.automatic_lock_age(@config)
+
+      assert cmd =~ "base64 -d ~/.xamal/lock-my-app/details"
+      assert cmd =~ "grep -q '^Message: Automatic deploy lock'"
+      assert cmd =~ "&& echo $(( $(date +%s) - $(stat -c %Y ~/.xamal/lock-my-app) ))"
+    end
+  end
+
   describe "ensure_locks_directory/1" do
     test "creates parent run directory with mkdir -p" do
       cmd = Lock.ensure_locks_directory(@config)

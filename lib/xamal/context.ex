@@ -13,6 +13,7 @@ defmodule Xamal.Context do
     :specific_roles,
     :verbosity,
     holding_lock: false,
+    holding_queue: false,
     connected: false
   ]
 
@@ -24,6 +25,7 @@ defmodule Xamal.Context do
           specific_roles: [String.t()] | nil,
           verbosity: :debug | :info | :error | nil,
           holding_lock: boolean(),
+          holding_queue: boolean(),
           connected: boolean()
         }
 
@@ -39,6 +41,10 @@ defmodule Xamal.Context do
 
   def put_holding_lock(%__MODULE__{} = context, holding_lock) do
     %{context | holding_lock: holding_lock}
+  end
+
+  def put_holding_queue(%__MODULE__{} = context, holding_queue) do
+    %{context | holding_queue: holding_queue}
   end
 
   def put_connected(%__MODULE__{} = context, connected), do: %{context | connected: connected}
