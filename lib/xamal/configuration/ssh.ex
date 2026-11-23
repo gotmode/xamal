@@ -72,11 +72,14 @@ defmodule Xamal.Configuration.Ssh do
 
   # With no key file on disk, sign through an ssh-agent (Secretive, 1Password,
   # ssh-agent) when `ssh.agent` names one, so the private key never has to sit
-  # on the filesystem.
+  # on the filesystem. With neither, :ssh's own key files in ~/.ssh sign.
+  # Every path goes through Xamal.SSH.KeyProvider so the server's host key is
+  # checked against known_hosts. :ssh_agent and :ssh_file would accept a
+  # changed key, since `silently_accept_hosts` covers it as a new one.
   defp put_agent_options(opts, ssh) do
     case agent_socket(ssh) do
-      nil -> opts
-      socket -> opts ++ [key_cb: {:ssh_agent, socket_path: String.to_charlist(socket)}]
+      nil -> opts ++ [key_cb: {Xamal.SSH.KeyProvider, []}]
+      socket -> opts ++ [key_cb: {Xamal.SSH.KeyProvider, agent: String.to_charlist(socket)}]
     end
   end
 
