@@ -69,10 +69,11 @@ defmodule Xamal.Configuration.SshTest do
       refute Keyword.has_key?(opts, :user_dir)
     end
 
-    test "uses :ssh defaults when no configured key exists on disk" do
+    test "uses :ssh's own key files when no configured key exists on disk" do
       opts = Ssh.connect_options(Ssh.new(%{"keys" => ["/nonexistent/xamal/key"]}))
 
-      refute Keyword.has_key?(opts, :key_cb)
+      # :ssh's own key files sign, and the host key is still checked.
+      assert Keyword.get(opts, :key_cb) == {Xamal.SSH.KeyProvider, []}
       refute Keyword.has_key?(opts, :user_dir)
     end
 

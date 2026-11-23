@@ -34,6 +34,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Xamal now checks a server's host key on every connection, whether it signs
+  with `ssh.keys`, `ssh.key_data`, `ssh.agent` or the key files in `~/.ssh`.
+  Before, every command ran over a connection that accepted any host key,
+  every time, so anyone able to answer on the server's
+  address received the release and the env file with its secrets. A server
+  seen for the first time is accepted and recorded in `~/.ssh/known_hosts`,
+  and a server that then presents a different key is refused, the same
+  `StrictHostKeyChecking=accept-new` the `scp` transfers already used. Hashed
+  `known_hosts` entries, which OpenSSH writes by default on Debian and Ubuntu,
+  are read too. If a server's key really did change, remove its line with
+  `ssh-keygen -R <host>` and deploy again. Xamal prints that command, with
+  the host filled in, when it refuses a key.
+- Through `ssh.proxy` or `ssh.proxy_command`, the server's host key is now
+  checked and recorded under the server's own name. Before, it was looked up
+  under `127.0.0.1` and a random local port, so it never matched anything.
 - A deploy holding the queue clears an automatic deploy lock that an
   interrupted deploy left behind (older than 15 minutes) instead of failing
   on it, and waits out a younger one. A lock taken by hand still stops it.

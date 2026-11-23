@@ -46,7 +46,10 @@ defmodule Xamal.SSH.Proxy do
 
     with {:ok, jump} <- :ssh.connect(to_charlist(jump_host), jump_port, jump_opts, timeout),
          {:ok, local_port} <- tunnel(jump, host, port, timeout),
-         {:ok, conn} <- connect_local(local_port, opts, timeout, fn -> :ssh.close(jump) end) do
+         {:ok, conn} <-
+           connect_local(local_port, for_target(opts, host, port), timeout, fn ->
+             :ssh.close(jump)
+           end) do
       {:ok, conn, fn -> :ssh.close(jump) end}
     else
       {:error, reason} -> {:error, "via jump host #{proxy}: #{format_reason(reason)}"}
@@ -73,15 +76,28 @@ defmodule Xamal.SSH.Proxy do
     :ok = :gen_tcp.controlling_process(listen, bridge)
     stop = fn -> send(bridge, :stop) end
 
-    case connect_local(local_port, opts, timeout, stop) do
+    case connect_local(local_port, for_target(opts, host, port), timeout, stop) do
       {:ok, conn} -> {:ok, conn, stop}
       {:error, reason} -> {:error, "via proxy command `#{command}`: #{format_reason(reason)}"}
     end
   end
 
-  # The target's host key is checked on this connection, but it's recorded
-  # against 127.0.0.1:<random port>, so don't save it to known_hosts.
-  #
+  # The target's host key is checked on the connection through the tunnel,
+  # where :ssh sees only 127.0.0.1:<random port>. Xamal.SSH.KeyProvider is told
+  # which server that really is, so it checks and records the key under the
+  # server's own name. Any other key callback would file the key under the
+  # local port, so there it is not saved.
+  defp for_target(opts, host, port) do
+    case Keyword.get(opts, :key_cb) do
+      {Xamal.SSH.KeyProvider, private} ->
+        private = Keyword.put(private, :host_key_for, {to_string(host), port})
+        Keyword.put(opts, :key_cb, {Xamal.SSH.KeyProvider, private})
+
+      _other ->
+        Keyword.put(opts, :save_accepted_host, false)
+    end
+  end
+
   # The first tunnel opened on a fresh jump connection can drop the target's
   # SSH banner if we connect immediately, and :ssh.connect then waits for it
   # until the timeout. A short pause avoids that (20ms was enough in testing);
@@ -90,7 +106,6 @@ defmodule Xamal.SSH.Proxy do
   @attempts 3
 
   defp connect_local(local_port, opts, timeout, on_error) do
-    opts = Keyword.put(opts, :save_accepted_host, false)
     Process.sleep(@settle_ms)
 
     case attempt_local(local_port, opts, max(div(timeout, @attempts), 1_000), @attempts) do

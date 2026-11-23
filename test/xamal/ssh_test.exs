@@ -2,6 +2,7 @@ defmodule Xamal.SSHTest do
   use ExUnit.Case, async: true
 
   alias Xamal.Configuration.Ssh
+  alias Xamal.SSH.KeyProvider
 
   describe "key_file/1 (scp-vs-sftp selection)" do
     test "returns {:ok, expanded} for an existing on-disk key (scp path)" do
@@ -179,17 +180,17 @@ defmodule Xamal.SSHTest do
 
   describe "ssh.agent" do
     test "with no key file, :ssh signs through the named agent socket" do
-      ssh = Xamal.Configuration.Ssh.new(%{"agent" => "/tmp/agent.sock"})
-      opts = Xamal.Configuration.Ssh.connect_options(ssh)
-      assert {:ssh_agent, socket_path: ~c"/tmp/agent.sock"} = opts[:key_cb]
+      ssh = Ssh.new(%{"agent" => "/tmp/agent.sock"})
+      opts = Ssh.connect_options(ssh)
+      assert {KeyProvider, agent: ~c"/tmp/agent.sock"} = opts[:key_cb]
     end
 
     test "a key file on disk wins over the agent" do
       path = Path.join(System.tmp_dir!(), "xamal_agent_test_key")
       File.write!(path, "not a real key")
 
-      ssh = Xamal.Configuration.Ssh.new(%{"keys" => [path], "agent" => "/tmp/agent.sock"})
-      assert {Xamal.SSH.KeyProvider, _} = Xamal.Configuration.Ssh.connect_options(ssh)[:key_cb]
+      ssh = Ssh.new(%{"keys" => [path], "agent" => "/tmp/agent.sock"})
+      assert {KeyProvider, _} = Ssh.connect_options(ssh)[:key_cb]
     after
       File.rm(Path.join(System.tmp_dir!(), "xamal_agent_test_key"))
     end
